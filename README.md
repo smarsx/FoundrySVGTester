@@ -1,5 +1,5 @@
 # FoundrySVGTester
-Test SVG &amp; metadata encoding with Foundry
+Test SVG &amp; metadata encoding with [Foundry](https://github.com/foundry-rs/foundry)
 
 - SVGStore.sol - basic contract to set/get URI's
 - NFTSVG.sol - library to base64 encode metadata and SVG into URI
