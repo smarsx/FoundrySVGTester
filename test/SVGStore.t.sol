@@ -4,19 +4,13 @@ pragma solidity >= 0.8.15;
 import {Test} from "forge-std/Test.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {console2 as console} from "forge-std/console2.sol";
-import {strings} from "stringutils/strings.sol";
+import {LibString} from "solady/utils/LibString.sol";
+import {Base64} from "solady/utils/Base64.sol";
 
 import {SVGStore} from "../src/SVGStore.sol";
 
-struct Json {
-    string description;
-    string image;
-    string name;
-}
-
 contract SVGStoreTest is Test {
     using stdJson for string;
-    using strings for *;
 
     SVGStore svgstore;
     mapping(string => string[]) public filenames;
@@ -46,36 +40,6 @@ contract SVGStoreTest is Test {
     }
 
     /**
-     * cut URI at first comma to get encoded portion.
-     *                              *
-     * (data:application/json;base64,eyJuYW1lIjoiVW5pc3dhcC)
-     */
-    function cutURI(string memory _file) public returns (string memory) {
-        string[] memory inputs = new string[](6);
-        inputs[0] = "cut";
-        inputs[1] = "-d"; // delimiter
-        inputs[2] = ",";
-        inputs[3] = "-f"; // fields
-        inputs[4] = "2";
-        inputs[5] = _file;
-        return string(vm.ffi(inputs));
-    }
-
-    function decodeURI(string memory _file) public returns (string memory) {
-        string[] memory inputs = new string[](3);
-        inputs[0] = "base64";
-        inputs[1] = "-d";
-        inputs[2] = _file;
-        return string(vm.ffi(inputs));
-    }
-
-    function cutAndDecodeURI(string memory _file) public returns (string memory) {
-        string memory cut = cutURI(_file);
-        vm.writeFile(_file, cut);
-        return decodeURI(_file);
-    }
-
-    /**
      * populate filenames map for _dir
      */
     function setFiles(string memory _dir) public {
@@ -85,15 +49,15 @@ contract SVGStoreTest is Test {
         string memory dir = string.concat(assetsdir, "/", _dir);
         string memory files = ls(dir);
         vm.writeFile(temptxt, files);
-        strings.slice memory ending = ".svg".toSlice();
-        strings.slice memory next = vm.readLine(temptxt).toSlice();
+        string memory next = vm.readLine(temptxt);
 
-        while (next.len() > 0) {
-            if (next.endsWith(ending)) {
-                filenames[_dir].push(next.toString());
+        while (bytes(next).length > 0) {
+            if (LibString.endsWith(next, ".svg")) {
+                filenames[_dir].push(next);
             }
-            next = vm.readLine(temptxt).toSlice();
+            next = vm.readLine(temptxt);
         }
+        vm.removeFile(temptxt);
     }
 
     /*///////////////////////////////////////////////////////////////////
@@ -112,64 +76,58 @@ contract SVGStoreTest is Test {
      * read svg, store in contract, retrieve URI from contract, decode, parse, and assert.
      * tests that inputs to contract == URI output
      */
-    function assertSvg(string memory _filename, string memory _dir, address _actor) public {
-        string memory temptxt = string.concat(tempdir, "/", _filename, ".txt");
-        string memory tempjson = string.concat(tempdir, "/", _filename, ".json");
+    function assertSvg(address _actor, string memory _filename, string memory _dir) public {
+        string memory tempjson = string.concat(tempdir, "/", _dir, ".json");
 
         // make path
         string memory path = string.concat(assetsdir, "/", _dir, "/", _filename);
 
-        // read svg
-        string memory svg = vm.readFile(path);
+        // read file
+        string memory contents = vm.readFile(path);
 
         // store in contract
         vm.prank(_actor);
-        svgstore.store(_filename, path, svg);
+        svgstore.store(_filename, path, contents);
 
         // get uri from contract
         string memory uri = svgstore.uris(_actor);
-        // store uri in temp
-        vm.writeFile(temptxt, uri);
-
-        // cut and decode uri
-        string memory decodedMetadata = cutAndDecodeURI(temptxt);
+        
+        // slice and decode uri
+        string memory cutUri = LibString.slice(uri, 29);
+        string memory decodedUri = string(Base64.decode(cutUri));
+        
         // write decoded metadata to json
-        vm.writeJson(decodedMetadata, tempjson);
+        vm.writeJson(decodedUri, tempjson);
+
         // read json
         string memory json = vm.readFile(tempjson);
-        // parse json
-        bytes memory metadata = json.parseRaw("$");
-        // decode json into struct
-        Json memory decodedJson = abi.decode(metadata, (Json));
+        
+        // decode json
+        string memory dname = abi.decode(json.parseRaw(".name"), (string));
+        string memory ddescription = abi.decode(json.parseRaw(".description"), (string));
+        string memory dcontent = abi.decode(json.parseRaw(".image"), (string));
 
-        // write encoded image to temp
-        vm.writeFile(temptxt, decodedJson.image);
+        // slice and decode content
+        string memory cutContent = LibString.slice(dcontent, 26);
+        string memory decodedContent = string(Base64.decode(cutContent));
 
-        // cut & decode image
-        string memory decodedSvg = cutAndDecodeURI(temptxt);
+        assertEq(_filename, dname);
+        assertEq(path, ddescription);
+        assertEq(contents, decodedContent);
 
-        // asserts
-        assertEq(_filename, decodedJson.name);
-        assertEq(path, decodedJson.description);
-        assertEq(svg, decodedSvg);
-
-        // write decoded svg to out to view
-        // vm.writeFile(string.concat(assetsOut, "/", _filename), decodedSvg);
-
-        vm.removeFile(temptxt);
         vm.removeFile(tempjson);
     }
 
     function assertSvgs(string memory _dir) public {
         address[] memory actors = getActors(filenames[_dir].length);
         for (uint256 i; i < filenames[_dir].length; i++) {
-            assertSvg(filenames[_dir][i], _dir, actors[i]);
+            assertSvg(actors[i], filenames[_dir][i], _dir);
         }
     }
 
     function assertSvgs(string memory _dir, uint256 index) public {
         address actor = address(uint160(4444));
-        assertSvg(filenames[_dir][index], _dir, actor);
+        assertSvg(actor, filenames[_dir][index], _dir);
     }
 
     /*///////////////////////////////////////////////////////////////////

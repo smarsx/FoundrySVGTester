@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity >=0.7.0;
 
-import {Base64} from "openzeppelin/utils/Base64.sol";
+import {Base64} from "solady/utils/Base64.sol";
 
 library NFTSVG {
     struct SVGParams {
