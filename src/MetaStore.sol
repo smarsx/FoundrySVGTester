@@ -19,12 +19,4 @@ contract MetaStore is Ownable {
             NFTMeta.MetaParams({typeUri: uri, name: _name, description: _description, blob: _blob})
         );
     }
-
-    function remove() public {
-        delete uris[msg.sender];
-    }
-
-    function implode(address payable _to) external onlyOwner {
-        selfdestruct(_to);
-    }
 }
